@@ -18,16 +18,18 @@ function blobConfigured(): boolean {
  * - Otherwise (local dev, traditional long-running server deployments),
  *   files are written to disk under `UPLOAD_DIR`, isolated per user id.
  *
- * Either way, raw bytes are only ever handed back through
- * `routes/documents.ts`'s authenticated `/file` route - the Blob URL
- * itself is never sent to the client - which is what keeps a document's
- * contents scoped to its owning session even though Blob storage is an
- * unguessable-but-technically-public URL.
+ * Blobs are written with `access: "private"`: reading one back requires
+ * the store's token (see `readFile` below), so a document's contents can't
+ * be fetched by anyone who merely gets hold of its Blob URL. Raw bytes are
+ * only ever handed back through `routes/documents.ts`'s authenticated
+ * `/file` route either way - the Blob URL itself is never sent to the
+ * client - but private access means that's not the only thing standing
+ * between a document and the open internet.
  */
 export async function saveFile(userId: string, filename: string, data: Buffer): Promise<string> {
   if (blobConfigured()) {
     const blob = await put(`${userId}/${filename}`, data, {
-      access: "public",
+      access: "private",
       addRandomSuffix: false,
       contentType: "application/pdf",
     });
@@ -43,7 +45,13 @@ export async function saveFile(userId: string, filename: string, data: Buffer): 
 
 export async function readFile(key: string): Promise<Buffer> {
   if (/^https?:\/\//.test(key)) {
-    const res = await fetch(key);
+    // Private blobs require the store's token to fetch, even though the
+    // URL itself isn't secret - see the note on saveFile above.
+    const res = await fetch(key, {
+      headers: process.env.BLOB_READ_WRITE_TOKEN
+        ? { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` }
+        : {},
+    });
     if (!res.ok) throw new Error(`Failed to read stored file (status ${res.status})`);
     return Buffer.from(await res.arrayBuffer());
   }

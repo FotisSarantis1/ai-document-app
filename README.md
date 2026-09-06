@@ -304,11 +304,12 @@ the responsive tablet/mobile tab layout all work as described.
   (`%PDF-` magic bytes), and capped at `MAX_FILE_SIZE_MB`.
 - PDF parsing runs in an isolated child process on a traditional server
   deployment (see [How PDF processing works](#how-pdf-processing-works)).
-- Uploaded files are never served from a static/public directory, and the
-  raw Vercel Blob URL (when that's the storage backend) is never sent to
-  the client either - the only way to read a document's file or text is
-  through routes that check the requesting session's `userId` against the
-  document's owner, then fetch the bytes server-side.
+- Uploaded files are never served from a static/public directory. On
+  Vercel, PDFs are stored in Blob with `access: "private"` - reading one
+  back requires the store's token, not just its URL - and even so, the raw
+  Blob URL is never sent to the client; the only way to read a document's
+  file or text is through routes that check the requesting session's
+  `userId` against the document's owner, then fetch the bytes server-side.
 - Each browser gets an anonymous, unguessable session id (httpOnly cookie)
   that scopes all of its documents and conversations. This is isolation
   between visitors, **not** a full authentication system - there are no
