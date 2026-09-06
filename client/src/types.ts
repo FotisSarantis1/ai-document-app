@@ -10,7 +10,7 @@ export interface DocumentRecord {
   status: DocumentStatus;
   error_message: string | null;
   page_count: number;
-  is_demo: number;
+  is_demo: boolean;
   uploaded_at: string;
 }
 

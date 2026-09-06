@@ -1,4 +1,4 @@
-import db from "../db";
+import { query as dbQuery } from "../db";
 
 export interface RetrievedChunk {
   documentId: string;
@@ -34,40 +34,41 @@ function tokenize(text: string): string[] {
  * swapping this function's body for a real embedding similarity search
  * later doesn't require touching callers (chat route) or the schema.
  */
-export function retrieveRelevantChunks(
+export async function retrieveRelevantChunks(
   userId: string,
-  query: string,
+  question: string,
   options: { documentIds?: string[]; topK?: number } = {}
-): RetrievedChunk[] {
+): Promise<RetrievedChunk[]> {
   const { documentIds, topK = 6 } = options;
 
-  const terms = Array.from(new Set(tokenize(query)));
+  const terms = Array.from(new Set(tokenize(question)));
   if (terms.length === 0) return [];
 
   let sql = `
-    SELECT p.page_number as pageNumber, p.text as text,
-           d.id as documentId, d.original_name as documentName
+    SELECT p.page_number as "pageNumber", p.text as "text",
+           d.id as "documentId", d.original_name as "documentName"
     FROM pages p
     JOIN documents d ON d.id = p.document_id
-    WHERE d.user_id = ? AND d.status = 'ready'
+    WHERE d.user_id = $1 AND d.status = 'ready'
   `;
   const params: any[] = [userId];
 
   if (documentIds && documentIds.length > 0) {
-    sql += ` AND d.id IN (${documentIds.map(() => "?").join(",")})`;
+    const placeholders = documentIds.map((_, i) => `$${params.length + i + 1}`).join(",");
+    sql += ` AND d.id IN (${placeholders})`;
     params.push(...documentIds);
   }
 
-  const rows = db.prepare(sql).all(...params) as {
+  const res = await dbQuery<{
     pageNumber: number;
     text: string;
     documentId: string;
     documentName: string;
-  }[];
+  }>(sql, params);
 
-  const phrase = query.toLowerCase().trim();
+  const phrase = question.toLowerCase().trim();
 
-  const scored: RetrievedChunk[] = rows.map((row) => {
+  const scored: RetrievedChunk[] = res.rows.map((row) => {
     const lowerText = row.text.toLowerCase();
     let score = 0;
 

@@ -21,7 +21,7 @@ export default function DocumentRow({ document, onDelete }: Props) {
             <p className="truncate text-sm font-medium text-slate-900" title={document.original_name}>
               {document.original_name}
             </p>
-            {document.is_demo === 1 && (
+            {document.is_demo && (
               <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                 Demo
               </span>

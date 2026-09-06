@@ -1,44 +1,56 @@
 import { v4 as uuidv4 } from "uuid";
-import db from "../db";
+import { query } from "../db";
 import { ConversationRecord, MessageRecord, Citation } from "../types";
 import { ChatTurn } from "./aiClient";
 
-export function createConversation(userId: string): ConversationRecord {
+export async function createConversation(userId: string): Promise<ConversationRecord> {
   const id = uuidv4();
-  db.prepare("INSERT INTO conversations (id, user_id) VALUES (?, ?)").run(id, userId);
-  return db.prepare("SELECT * FROM conversations WHERE id = ?").get(id) as ConversationRecord;
+  const res = await query<ConversationRecord>(
+    `INSERT INTO conversations (id, user_id) VALUES ($1, $2) RETURNING *`,
+    [id, userId]
+  );
+  return res.rows[0];
 }
 
-export function getConversation(id: string, userId: string): ConversationRecord | undefined {
-  return db
-    .prepare("SELECT * FROM conversations WHERE id = ? AND user_id = ?")
-    .get(id, userId) as ConversationRecord | undefined;
+export async function getConversation(
+  id: string,
+  userId: string
+): Promise<ConversationRecord | undefined> {
+  const res = await query<ConversationRecord>(
+    `SELECT * FROM conversations WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  return res.rows[0];
 }
 
-export function getHistory(conversationId: string, limit = 10): ChatTurn[] {
-  const rows = db
-    .prepare(
-      `SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ?`
-    )
-    .all(conversationId, limit) as { role: "user" | "assistant"; content: string }[];
-  return rows;
+export async function getHistory(conversationId: string, limit = 10): Promise<ChatTurn[]> {
+  const res = await query<{ role: "user" | "assistant"; content: string }>(
+    `SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT $2`,
+    [conversationId, limit]
+  );
+  return res.rows;
 }
 
-export function addMessage(
+export async function addMessage(
   conversationId: string,
   role: "user" | "assistant",
   content: string,
   citations: Citation[] = []
-): MessageRecord {
+): Promise<MessageRecord> {
   const id = uuidv4();
-  db.prepare(
-    `INSERT INTO messages (id, conversation_id, role, content, citations) VALUES (?, ?, ?, ?, ?)`
-  ).run(id, conversationId, role, content, JSON.stringify(citations));
-  return db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as MessageRecord;
+  const res = await query<MessageRecord>(
+    `INSERT INTO messages (id, conversation_id, role, content, citations)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [id, conversationId, role, content, JSON.stringify(citations)]
+  );
+  return res.rows[0];
 }
 
-export function getMessages(conversationId: string): MessageRecord[] {
-  return db
-    .prepare(`SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC`)
-    .all(conversationId) as MessageRecord[];
+export async function getMessages(conversationId: string): Promise<MessageRecord[]> {
+  const res = await query<MessageRecord>(
+    `SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
+    [conversationId]
+  );
+  return res.rows;
 }

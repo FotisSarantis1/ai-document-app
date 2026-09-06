@@ -10,8 +10,8 @@ export interface DocumentRecord {
   status: DocumentStatus;
   error_message: string | null;
   page_count: number;
-  is_demo: number;
-  uploaded_at: string;
+  is_demo: boolean;
+  uploaded_at: Date;
 }
 
 export interface PageRecord {
@@ -19,7 +19,7 @@ export interface PageRecord {
   document_id: string;
   page_number: number;
   text: string;
-  created_at: string;
+  created_at: Date;
 }
 
 export interface Citation {
@@ -33,7 +33,7 @@ export interface ConversationRecord {
   id: string;
   user_id: string;
   title: string | null;
-  created_at: string;
+  created_at: Date;
 }
 
 export interface MessageRecord {
@@ -42,5 +42,5 @@ export interface MessageRecord {
   role: "user" | "assistant";
   content: string;
   citations: string | null;
-  created_at: string;
+  created_at: Date;
 }

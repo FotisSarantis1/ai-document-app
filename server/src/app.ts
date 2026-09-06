@@ -5,18 +5,36 @@ import { sessionMiddleware } from "./middleware/session";
 import documentsRouter from "./routes/documents";
 import chatRouter from "./routes/chat";
 import { isDemoMode } from "./services/aiClient";
+import { initDb } from "./db";
 
 export function createApp() {
   const app = express();
 
   app.use(
     cors({
-      origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
+      // In production this API is served from the same origin as the
+      // client (via Vercel rewrites), so CORS never actually applies there.
+      // Reflecting the request origin (rather than hardcoding one) keeps
+      // local dev and any preview-deployment URLs working without extra
+      // configuration, while still requiring `credentials: true` cookies.
+      origin: process.env.CLIENT_ORIGIN || true,
       credentials: true,
     })
   );
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
+
+  // Postgres schema init is idempotent and cached after the first call, so
+  // this only does real work once per cold start.
+  app.use(async (_req, _res, next) => {
+    try {
+      await initDb();
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.use(sessionMiddleware);
 
   app.get("/api/health", (_req, res) => {

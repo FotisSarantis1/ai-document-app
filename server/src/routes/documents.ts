@@ -1,29 +1,22 @@
 import { Router, Request, Response } from "express";
-import fs from "fs";
 import path from "path";
 import { upload, InvalidFileError, MAX_FILE_SIZE_BYTES } from "../middleware/upload";
 import {
-  createProcessingDocumentRecord,
+  createDocument,
   processDocument,
   listDocuments,
   getDocumentById,
   getPages,
   deleteDocument,
 } from "../services/documentService";
+import { readFile } from "../services/storage";
 import { generateSummary } from "../services/summaryService";
 import { loadDemoDocuments } from "../services/demoService";
 
 const router = Router();
 
-function isPdfSignature(filePath: string): boolean {
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const buf = Buffer.alloc(5);
-    fs.readSync(fd, buf, 0, 5, 0);
-    return buf.toString("ascii") === "%PDF-";
-  } finally {
-    fs.closeSync(fd);
-  }
+function isPdfSignature(buffer: Buffer): boolean {
+  return buffer.subarray(0, 5).toString("ascii") === "%PDF-";
 }
 
 // POST /api/documents/upload - accepts one or more PDFs
@@ -48,8 +41,7 @@ router.post("/upload", (req: Request, res: Response) => {
       // Defense in depth: the client-declared mimetype/extension already
       // passed the multer filter, but only the file's magic bytes prove it's
       // really a PDF and not a renamed executable or script.
-      if (!isPdfSignature(file.path)) {
-        fs.unlinkSync(file.path);
+      if (!isPdfSignature(file.buffer)) {
         results.push({
           originalName: file.originalname,
           error: "File content is not a valid PDF.",
@@ -57,11 +49,10 @@ router.post("/upload", (req: Request, res: Response) => {
         continue;
       }
 
-      const doc = createProcessingDocumentRecord({
+      const doc = await createDocument({
         userId: req.userId,
-        filename: file.filename,
         originalName: file.originalname,
-        filePath: file.path,
+        fileBuffer: file.buffer,
         fileSize: file.size,
       });
 
@@ -90,51 +81,55 @@ router.post("/demo", async (req: Request, res: Response) => {
 });
 
 // GET /api/documents?search=
-router.get("/", (req: Request, res: Response) => {
+router.get("/", async (req: Request, res: Response) => {
   const search = typeof req.query.search === "string" ? req.query.search : undefined;
-  const docs = listDocuments(req.userId, search);
+  const docs = await listDocuments(req.userId, search);
   res.json({ documents: docs });
 });
 
 // GET /api/documents/:id
-router.get("/:id", (req: Request, res: Response) => {
-  const doc = getDocumentById(req.params.id, req.userId);
+router.get("/:id", async (req: Request, res: Response) => {
+  const doc = await getDocumentById(req.params.id, req.userId);
   if (!doc) return res.status(404).json({ error: "Document not found." });
   res.json({ document: doc });
 });
 
 // GET /api/documents/:id/pages
-router.get("/:id/pages", (req: Request, res: Response) => {
-  const doc = getDocumentById(req.params.id, req.userId);
+router.get("/:id/pages", async (req: Request, res: Response) => {
+  const doc = await getDocumentById(req.params.id, req.userId);
   if (!doc) return res.status(404).json({ error: "Document not found." });
-  res.json({ pages: getPages(doc.id) });
+  res.json({ pages: await getPages(doc.id) });
 });
 
 // GET /api/documents/:id/pages/:pageNumber - single page content (for citation viewer)
-router.get("/:id/pages/:pageNumber", (req: Request, res: Response) => {
-  const doc = getDocumentById(req.params.id, req.userId);
+router.get("/:id/pages/:pageNumber", async (req: Request, res: Response) => {
+  const doc = await getDocumentById(req.params.id, req.userId);
   if (!doc) return res.status(404).json({ error: "Document not found." });
   const pageNumber = Number(req.params.pageNumber);
-  const page = getPages(doc.id).find((p) => p.page_number === pageNumber);
+  const pages = await getPages(doc.id);
+  const page = pages.find((p) => p.page_number === pageNumber);
   if (!page) return res.status(404).json({ error: "Page not found." });
   res.json({ page, documentName: doc.original_name });
 });
 
 // GET /api/documents/:id/file - serves the raw PDF, scoped to the owning user only
-router.get("/:id/file", (req: Request, res: Response) => {
-  const doc = getDocumentById(req.params.id, req.userId);
+router.get("/:id/file", async (req: Request, res: Response) => {
+  const doc = await getDocumentById(req.params.id, req.userId);
   if (!doc) return res.status(404).json({ error: "Document not found." });
-  if (!fs.existsSync(doc.file_path)) {
-    return res.status(404).json({ error: "File is no longer available." });
+
+  try {
+    const buffer = await readFile(doc.file_path);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${path.basename(doc.original_name)}"`);
+    res.send(buffer);
+  } catch {
+    res.status(404).json({ error: "File is no longer available." });
   }
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${path.basename(doc.original_name)}"`);
-  res.sendFile(path.resolve(doc.file_path));
 });
 
 // POST /api/documents/:id/summarize
 router.post("/:id/summarize", async (req: Request, res: Response) => {
-  const doc = getDocumentById(req.params.id, req.userId);
+  const doc = await getDocumentById(req.params.id, req.userId);
   if (!doc) return res.status(404).json({ error: "Document not found." });
   if (doc.status !== "ready") {
     return res.status(409).json({ error: `Document is not ready yet (status: ${doc.status}).` });
@@ -149,8 +144,8 @@ router.post("/:id/summarize", async (req: Request, res: Response) => {
 });
 
 // DELETE /api/documents/:id
-router.delete("/:id", (req: Request, res: Response) => {
-  const deleted = deleteDocument(req.params.id, req.userId);
+router.delete("/:id", async (req: Request, res: Response) => {
+  const deleted = await deleteDocument(req.params.id, req.userId);
   if (!deleted) return res.status(404).json({ error: "Document not found." });
   res.status(204).send();
 });

@@ -2,8 +2,10 @@
 "use strict";
 
 /**
- * Standalone PDF text-extraction worker, always run as its own child
- * process (see src/services/pdfProcessor.ts) rather than loaded in-process.
+ * Standalone PDF text-extraction worker, run as its own child process (see
+ * src/services/pdfProcessor.ts) for local dev, tests, and a traditional
+ * long-running server deployment - NOT used on Vercel (see pdfProcessor.ts
+ * for why).
  *
  * Two reasons for the extra process boundary instead of just requiring
  * pdfjs-dist directly from the server:
@@ -20,7 +22,7 @@
  */
 
 const fs = require("fs");
-const path = require("path");
+const { extractPages } = require("./pdfExtractCore");
 
 async function main() {
   const inputPath = process.argv[2];
@@ -31,34 +33,10 @@ async function main() {
   }
 
   const pdfjs = require("pdfjs-dist/legacy/build/pdf.mjs");
-  const standardFontDataUrl = path.join(
-    path.dirname(require.resolve("pdfjs-dist/package.json")),
-    "standard_fonts/"
-  );
+  const buffer = fs.readFileSync(inputPath);
+  const result = await extractPages(pdfjs, buffer);
 
-  const data = new Uint8Array(fs.readFileSync(inputPath));
-  const loadingTask = pdfjs.getDocument({
-    data,
-    useWorkerFetch: false,
-    disableFontFace: true,
-    standardFontDataUrl,
-  });
-
-  const doc = await loadingTask.promise;
-  const pages = [];
-
-  try {
-    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
-      const page = await doc.getPage(pageNumber);
-      const textContent = await page.getTextContent();
-      const text = textContent.items.map((item) => item.str).join(" ");
-      pages.push({ pageNumber, text });
-    }
-  } finally {
-    await loadingTask.destroy();
-  }
-
-  process.stdout.write(JSON.stringify({ pageCount: pages.length, pages }));
+  process.stdout.write(JSON.stringify(result));
 }
 
 main().catch((err) => {

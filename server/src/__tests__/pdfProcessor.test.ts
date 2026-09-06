@@ -40,3 +40,14 @@ describe("extractPdfPages", () => {
     expect(/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(result.pages[0].text)).toBe(false);
   });
 });
+
+// The `process.env.VERCEL` in-process extraction path (see pdfProcessor.ts)
+// intentionally isn't exercised by this Jest suite: it calls a plain
+// `require()` of pdfjs-dist's ESM build, relying on Node's own native
+// require(ESM) support - which works in a real `node`/`tsx` process (as
+// used by `npm run dev`/`npm start`, and by Vercel's Node runtime) but not
+// inside Jest's own module loader, which is exactly the incompatibility the
+// child-process worker exists to route around for tests in the first
+// place. That path is verified manually instead (see README's deployment
+// notes) by running it under `tsx` with `VERCEL=1` set and diffing the
+// output against the default worker path.

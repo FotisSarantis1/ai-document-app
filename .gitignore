@@ -19,6 +19,9 @@ server/demo-data/*.pdf
 client/dist/
 client/.vite/
 
+# Vercel local project link/build output - never committed
+.vercel
+
 # misc
 .DS_Store
 *.log

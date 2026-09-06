@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import db from "../db";
+import { initDb, query } from "../db";
 import { loadDemoDocuments } from "../services/demoService";
 
 const DEMO_USER_ID = "demo-cli-user";
@@ -14,7 +14,8 @@ const DEMO_USER_ID = "demo-cli-user";
  * for the current browser session instead of this fixed CLI user.
  */
 async function main() {
-  db.prepare("INSERT OR IGNORE INTO users (id) VALUES (?)").run(DEMO_USER_ID);
+  await initDb();
+  await query("INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [DEMO_USER_ID]);
 
   console.log(`Generating and processing demo documents for user "${DEMO_USER_ID}"...`);
   const docs = await loadDemoDocuments(DEMO_USER_ID);

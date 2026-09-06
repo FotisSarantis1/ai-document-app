@@ -45,7 +45,7 @@ describe("POST /api/documents/demo", () => {
     expect(res.status).toBe(201);
     expect(res.body.documents.length).toBeGreaterThanOrEqual(3);
     for (const doc of res.body.documents) {
-      expect(doc.is_demo).toBe(1);
+      expect(doc.is_demo).toBe(true);
       expect(doc.status).toBe("ready");
       expect(doc.page_count).toBeGreaterThan(0);
     }

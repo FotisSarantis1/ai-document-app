@@ -27,20 +27,25 @@ router.post("/ask", async (req: Request, res: Response) => {
   const { question, documentIds } = parsed.data;
 
   let conversation = parsed.data.conversationId
-    ? getConversation(parsed.data.conversationId, req.userId)
+    ? await getConversation(parsed.data.conversationId, req.userId)
     : undefined;
   if (!conversation) {
-    conversation = createConversation(req.userId);
+    conversation = await createConversation(req.userId);
   }
 
   try {
-    const chunks = retrieveRelevantChunks(req.userId, question, { documentIds });
-    const history = getHistory(conversation.id);
+    const chunks = await retrieveRelevantChunks(req.userId, question, { documentIds });
+    const history = await getHistory(conversation.id);
 
     const result = await answerQuestion(question, chunks, history);
 
-    addMessage(conversation.id, "user", question);
-    const assistantMessage = addMessage(conversation.id, "assistant", result.answer, result.citations);
+    await addMessage(conversation.id, "user", question);
+    const assistantMessage = await addMessage(
+      conversation.id,
+      "assistant",
+      result.answer,
+      result.citations
+    );
 
     res.json({
       conversationId: conversation.id,
@@ -61,11 +66,11 @@ router.post("/ask", async (req: Request, res: Response) => {
 });
 
 // GET /api/chat/:conversationId/messages
-router.get("/:conversationId/messages", (req: Request, res: Response) => {
-  const conversation = getConversation(req.params.conversationId, req.userId);
+router.get("/:conversationId/messages", async (req: Request, res: Response) => {
+  const conversation = await getConversation(req.params.conversationId, req.userId);
   if (!conversation) return res.status(404).json({ error: "Conversation not found." });
 
-  const messages = getMessages(conversation.id).map((m) => ({
+  const messages = (await getMessages(conversation.id)).map((m) => ({
     id: m.id,
     role: m.role,
     content: m.content,

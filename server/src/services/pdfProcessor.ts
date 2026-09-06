@@ -54,25 +54,55 @@ function runExtractionWorker(pdfFilePath: string): Promise<WorkerResult> {
 }
 
 /**
+ * Vercel-only path: extracts in the same process instead of spawning a
+ * child. Two reasons this differs from the default (see
+ * scripts/pdfExtractWorker.js's header for the default's rationale):
+ *  1. A serverless function's deployment bundle is built by statically
+ *     tracing `require`/`import` calls. A path only ever referenced via
+ *     `execFile(...)` (as the worker is) is invisible to that tracer and
+ *     would silently be left out of the deployed bundle - the same
+ *     `require("pdfjs-dist/...")` here is a normal, staticaly-traceable
+ *     call reachable from this file's own import graph, so it bundles
+ *     correctly.
+ *  2. The crash/hang isolation a child process buys on a long-running
+ *     server is largely redundant on Vercel: each invocation already runs
+ *     in its own short-lived, isolated sandbox, so an in-process failure
+ *     here only ever fails that one request.
+ */
+async function runInProcess(buffer: Buffer): Promise<WorkerResult> {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pdfjs = require("pdfjs-dist/legacy/build/pdf.mjs");
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { extractPages } = require("../../scripts/pdfExtractCore");
+  return extractPages(pdfjs, buffer);
+}
+
+function sanitizeResult(result: WorkerResult): ExtractionResult {
+  const pages = result.pages
+    .map((p) => ({ pageNumber: p.pageNumber, text: sanitizeText(p.text) }))
+    .sort((a, b) => a.pageNumber - b.pageNumber);
+  return { pageCount: pages.length, pages };
+}
+
+/**
  * Extracts text from a PDF buffer while preserving page boundaries.
  *
- * The actual parsing (pdfjs-dist) runs in a short-lived child process (see
- * scripts/pdfExtractWorker.js) rather than in-process, so a malformed or
- * malicious upload can't crash or hang the API server. Each page's text is
- * captured separately, which is what lets retrieval and citations point at
- * a specific page number instead of just "somewhere in the file".
+ * Each page's text is captured separately, which is what lets retrieval and
+ * citations point at a specific page number instead of just "somewhere in
+ * the file". See `runInProcess` vs `runExtractionWorker` above for why
+ * parsing happens differently depending on the deployment target.
  */
 export async function extractPdfPages(buffer: Buffer): Promise<ExtractionResult> {
+  if (process.env.VERCEL) {
+    return sanitizeResult(await runInProcess(buffer));
+  }
+
   const tmpFile = path.join(os.tmpdir(), `pdf-extract-${crypto.randomUUID()}.pdf`);
   fs.writeFileSync(tmpFile, buffer);
 
   try {
     const result = await runExtractionWorker(tmpFile);
-    const pages = result.pages
-      .map((p) => ({ pageNumber: p.pageNumber, text: sanitizeText(p.text) }))
-      .sort((a, b) => a.pageNumber - b.pageNumber);
-
-    return { pageCount: pages.length, pages };
+    return sanitizeResult(result);
   } finally {
     fs.unlink(tmpFile, () => {
       /* best-effort cleanup of the temp copy */

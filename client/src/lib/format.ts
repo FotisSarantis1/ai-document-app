@@ -1,5 +1,5 @@
 export function formatDate(iso: string): string {
-  const date = new Date(iso.replace(" ", "T") + "Z");
+  const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleDateString(undefined, {
     month: "short",
@@ -9,7 +9,7 @@ export function formatDate(iso: string): string {
 }
 
 export function formatTime(iso: string): string {
-  const date = new Date(iso.replace(" ", "T") + "Z");
+  const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
