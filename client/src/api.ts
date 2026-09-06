@@ -112,6 +112,20 @@ export function uploadDocumentsWithProgress(
   });
 }
 
+/**
+ * Triggers extraction for a document created via upload. Called right after
+ * upload finishes, as its own request rather than something the server
+ * kicks off in the background during /upload - on Vercel, a serverless
+ * invocation isn't guaranteed to keep running unawaited work after its
+ * response is sent, so processing needs its own request/invocation with its
+ * own time budget instead of riding along inside the upload response.
+ * Safe to call more than once; a no-op once the document has left
+ * "processing".
+ */
+export function processDocument(id: string): Promise<{ document: DocumentRecord }> {
+  return request(`/documents/${id}/process`, { method: "POST" });
+}
+
 export function deleteDocument(id: string): Promise<void> {
   return request(`/documents/${id}`, { method: "DELETE" });
 }

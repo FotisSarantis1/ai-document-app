@@ -1,18 +1,9 @@
 import request from "supertest";
 import { createApp } from "../app";
 import { makeTestPdf } from "./helpers/makePdf";
+import { processAndWait } from "./helpers/testFlow";
 
 const app = createApp();
-
-async function waitUntilReady(agent: any, docId: string, timeoutMs = 5000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const res = await agent.get(`/api/documents/${docId}`);
-    if (res.body.document.status !== "processing") return res.body.document;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw new Error("Timed out waiting for document to finish processing");
-}
 
 describe("POST /api/documents/upload", () => {
   it("uploads a valid multi-page PDF and stores document + page records", async () => {
@@ -27,9 +18,13 @@ describe("POST /api/documents/upload", () => {
     expect(uploadRes.body.results).toHaveLength(1);
     const created = uploadRes.body.results[0].document;
     expect(created.original_name).toBe("handbook.pdf");
-    expect(["processing", "ready"]).toContain(created.status);
+    // /upload must never start extraction itself - see POST /:id/process.
+    // A serverless deployment can't reliably run unawaited background work
+    // after the response is sent, so this response has to come back with
+    // the document still "processing", every time, not just "usually".
+    expect(created.status).toBe("processing");
 
-    const doc = await waitUntilReady(agent, created.id);
+    const doc = await processAndWait(agent, created.id);
     expect(doc.status).toBe("ready");
     expect(doc.page_count).toBe(2);
 
@@ -50,7 +45,7 @@ describe("POST /api/documents/upload", () => {
       .post("/api/documents/upload")
       .attach("files", pdf, { filename: "one-pager.pdf", contentType: "application/pdf" });
     const docId = uploadRes.body.results[0].document.id;
-    await waitUntilReady(agent, docId);
+    await processAndWait(agent, docId);
 
     const listRes = await agent.get("/api/documents");
     expect(listRes.status).toBe(200);
@@ -99,13 +94,52 @@ describe("POST /api/documents/upload", () => {
       .post("/api/documents/upload")
       .attach("files", pdf, { filename: "private.pdf", contentType: "application/pdf" });
     const docId = uploadRes.body.results[0].document.id;
-    await waitUntilReady(agentA, docId);
+    await processAndWait(agentA, docId);
 
     const listB = await agentB.get("/api/documents");
     expect(listB.body.documents).toHaveLength(0);
 
     const getB = await agentB.get(`/api/documents/${docId}`);
     expect(getB.status).toBe(404);
+  });
+});
+
+describe("POST /api/documents/:id/process", () => {
+  it("is a no-op the second time it's called on an already-processed document", async () => {
+    const agent = request.agent(app);
+    const pdf = await makeTestPdf(["Content to extract."]);
+    const uploadRes = await agent
+      .post("/api/documents/upload")
+      .attach("files", pdf, { filename: "doc.pdf", contentType: "application/pdf" });
+    const docId = uploadRes.body.results[0].document.id;
+
+    const first = await processAndWait(agent, docId);
+    expect(first.status).toBe("ready");
+
+    const second = await agent.post(`/api/documents/${docId}/process`);
+    expect(second.status).toBe(200);
+    expect(second.body.document.status).toBe("ready");
+    expect(second.body.document.page_count).toBe(first.page_count);
+  });
+
+  it("returns 404 for a document that does not belong to the caller", async () => {
+    const agentA = request.agent(app);
+    const agentB = request.agent(app);
+
+    const pdf = await makeTestPdf(["Private content."]);
+    const uploadRes = await agentA
+      .post("/api/documents/upload")
+      .attach("files", pdf, { filename: "private.pdf", contentType: "application/pdf" });
+    const docId = uploadRes.body.results[0].document.id;
+
+    const res = await agentB.post(`/api/documents/${docId}/process`);
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for a document id that does not exist", async () => {
+    const agent = request.agent(app);
+    const res = await agent.post("/api/documents/does-not-exist/process");
+    expect(res.status).toBe(404);
   });
 });
 
@@ -117,7 +151,7 @@ describe("DELETE /api/documents/:id", () => {
       .post("/api/documents/upload")
       .attach("files", pdf, { filename: "delete-me.pdf", contentType: "application/pdf" });
     const docId = uploadRes.body.results[0].document.id;
-    await waitUntilReady(agent, docId);
+    await processAndWait(agent, docId);
 
     const del = await agent.delete(`/api/documents/${docId}`);
     expect(del.status).toBe(204);

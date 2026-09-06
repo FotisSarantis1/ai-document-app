@@ -1,18 +1,9 @@
 import request from "supertest";
 import { createApp } from "../app";
 import { makeTestPdf } from "./helpers/makePdf";
+import { processAndWait } from "./helpers/testFlow";
 
 const app = createApp();
-
-async function waitUntilReady(agent: any, docId: string, timeoutMs = 5000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const res = await agent.get(`/api/documents/${docId}`);
-    if (res.body.document.status !== "processing") return res.body.document;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw new Error("Timed out waiting for document to finish processing");
-}
 
 async function uploadReadyDoc(agent: any, filename: string, pages: string[]) {
   const pdf = await makeTestPdf(pages);
@@ -20,7 +11,7 @@ async function uploadReadyDoc(agent: any, filename: string, pages: string[]) {
     .post("/api/documents/upload")
     .attach("files", pdf, { filename, contentType: "application/pdf" });
   const docId = uploadRes.body.results[0].document.id;
-  await waitUntilReady(agent, docId);
+  await processAndWait(agent, docId);
   return docId;
 }
 

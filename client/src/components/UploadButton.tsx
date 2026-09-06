@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { uploadDocumentsWithProgress } from "../api";
+import { uploadDocumentsWithProgress, processDocument } from "../api";
 
 const MAX_FILE_SIZE_MB = 20;
 
@@ -80,6 +80,19 @@ export default function UploadButton({ onUploaded }: Props) {
       } else {
         setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, state: "done", progress: 100 } : t)));
         onUploaded();
+
+        // Kick off extraction as separate requests, one per uploaded
+        // document, rather than waiting for the server to do it in the
+        // background of the upload response (see api.ts's processDocument
+        // for why). Not awaited here - the dashboard's polling picks up
+        // each document's status once its own request completes.
+        for (const r of results) {
+          if (r.document) {
+            processDocument(r.document.id).catch(() => {
+              /* the document just stays in "processing"; the user can retry by re-uploading */
+            });
+          }
+        }
       }
     } catch (err: any) {
       setTasks((prev) =>

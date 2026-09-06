@@ -160,9 +160,23 @@ Vercel rewrites) in production.
    about its MIME type.
 2. The file is persisted via `services/storage.ts` (local disk, or Vercel
    Blob when deployed there), and a `documents` row is created with
-   `status = "processing"`. Text extraction then runs
-   (see `services/pdfProcessor.ts`).
-3. Extraction parses the PDF with `pdfjs-dist`, one page at a time, but
+   `status = "processing"`. **The upload request returns right here** -
+   with the document still `"processing"` - without starting extraction.
+3. The client immediately fires a separate request,
+   `POST /api/documents/:id/process`, which is what actually runs
+   extraction (see `services/pdfProcessor.ts`). This is a second HTTP
+   request rather than the server just kicking extraction off "in the
+   background" of the upload response, because on Vercel that background
+   work isn't reliably background: a serverless invocation isn't guaranteed
+   to keep running unawaited work after its response is sent, so an
+   unawaited `processDocument()` call inside `/upload` could end up
+   blocking - and occasionally timing out - the very response it was
+   supposed to let return immediately. A separate request gets its own
+   invocation with its own full time budget, genuinely decoupled from the
+   upload response. `/process` is idempotent (calling it again on an
+   already-processed document is a harmless no-op), so this is also safe
+   under retries.
+4. Extraction itself parses the PDF with `pdfjs-dist`, one page at a time, but
    *where* that parsing runs depends on the deployment target:
    - **Local dev, tests, or a traditional long-running server**: parsing
      happens in a **separate short-lived child process**
@@ -178,10 +192,10 @@ Vercel rewrites) in production.
      paths share the same extraction logic (`scripts/pdfExtractCore.js`) so
      there's exactly one implementation of "given a PDF, return per-page
      text", not two to keep in sync.
-4. Each page's text becomes its own row in the `pages` table
+5. Each page's text becomes its own row in the `pages` table
    (`document_id`, `page_number`, `text`), which is what lets citations and
    the PDF viewer point at an exact page instead of "somewhere in the file".
-5. The document flips to `status = "ready"` (or `"error"` with a message,
+6. The document flips to `status = "ready"` (or `"error"` with a message,
    if extraction failed) and the dashboard picks up the change via polling.
 
 ## How AI retrieval works
@@ -253,9 +267,14 @@ Tests need no external services and no `DATABASE_URL` - they run against
 engine, so `npm test` is fully self-contained (see
 `src/__tests__/setupEnv.ts` and `src/db/index.ts`).
 
-21 automated tests (Jest + Supertest) cover:
+24 automated tests (Jest + Supertest) cover:
 
-- PDF upload (valid files, multi-file batches)
+- PDF upload (valid files, multi-file batches) - and that `/upload` always
+  responds with the document still `"processing"`, never starting
+  extraction itself (see [How PDF processing works](#how-pdf-processing-works))
+- The separate `/:id/process` endpoint: extraction completing it, calling
+  it again being a harmless no-op, and it being scoped to the calling
+  session like every other document route
 - Text extraction and **page-boundary preservation** (a 3-page PDF yields 3
   distinct, correctly-ordered page records)
 - Document storage and listing, including search

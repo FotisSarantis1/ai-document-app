@@ -58,16 +58,39 @@ router.post("/upload", (req: Request, res: Response) => {
 
       results.push({ document: doc });
 
-      // Process asynchronously so the upload response returns immediately;
-      // the dashboard polls status and flips "processing" -> "ready"/"error".
-      processDocument(doc.id).catch(() => {
-        /* processDocument already persists failure state internally */
-      });
+      // Deliberately NOT started here - see POST /:id/process. Kicking off
+      // extraction as an unawaited ("fire and forget") promise in this same
+      // request looks like it returns the response immediately, but on
+      // Vercel's serverless runtime the invocation isn't actually considered
+      // finished until the event loop drains, so the client's response gets
+      // held up behind that background work anyway and the whole request
+      // can hit the function's timeout. The client triggers processing with
+      // a separate request instead, so it runs in its own invocation with
+      // its own time budget, fully decoupled from this response.
     }
 
     const allFailed = results.every((r) => "error" in r);
     res.status(allFailed ? 400 : 201).json({ results });
   });
+});
+
+// POST /api/documents/:id/process - runs extraction for a document created
+// via /upload. Called by the client right after upload; kept as its own
+// endpoint (rather than folded into /upload) specifically so it runs as a
+// separate request/invocation with its own time budget - see the comment
+// above. Safe to call more than once: a no-op once the document has left
+// "processing".
+router.post("/:id/process", async (req: Request, res: Response) => {
+  const doc = await getDocumentById(req.params.id, req.userId);
+  if (!doc) return res.status(404).json({ error: "Document not found." });
+
+  if (doc.status !== "processing") {
+    return res.json({ document: doc });
+  }
+
+  await processDocument(doc.id);
+  const updated = await getDocumentById(req.params.id, req.userId);
+  res.json({ document: updated });
 });
 
 // POST /api/documents/demo - loads the bundled sample PDFs into the current session
