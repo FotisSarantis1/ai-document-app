@@ -184,14 +184,21 @@ Vercel rewrites) in production.
      malformed or hostile PDF can crash or hang that worker without taking
      down the API server - defense in depth for parsing untrusted uploads.
    - **On Vercel**: parsing happens in-process instead. A serverless
-     function's deployment bundle is built by statically tracing
-     `require`/`import` calls, and a path only ever reached via a spawned
-     child process is invisible to that tracer; the crash/hang isolation a
+     function's deployment bundle is built by tracing which files are
+     actually reachable, and a path only ever reached via a spawned child
+     process isn't reliably part of that trace; the crash/hang isolation a
      child process buys is also largely redundant there, since each
-     invocation already runs in its own short-lived, isolated sandbox. Both
-     paths share the same extraction logic (`scripts/pdfExtractCore.js`) so
-     there's exactly one implementation of "given a PDF, return per-page
-     text", not two to keep in sync.
+     invocation already runs in its own short-lived, isolated sandbox.
+     `pdfjs-dist` is ESM-only, and loading it in-process needs a genuine
+     dynamic `import()` at runtime - Vercel's Node runtime rejects a plain
+     `require()` of it outright - kept behind a small
+     `new Function("s", "return import(s)")` indirection specifically so
+     TypeScript's own CommonJS compilation (which is what Vercel actually
+     deploys here, not raw source) can't rewrite that `import()` back into
+     the same `require()` call it's working around. Both paths share the
+     same extraction logic (`scripts/pdfExtractCore.js`) so there's exactly
+     one implementation of "given a PDF, return per-page text", not two to
+     keep in sync.
 5. Each page's text becomes its own row in the `pages` table
    (`document_id`, `page_number`, `text`), which is what lets citations and
    the PDF viewer point at an exact page instead of "somewhere in the file".

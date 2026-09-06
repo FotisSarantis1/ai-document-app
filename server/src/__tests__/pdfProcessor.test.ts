@@ -42,12 +42,18 @@ describe("extractPdfPages", () => {
 });
 
 // The `process.env.VERCEL` in-process extraction path (see pdfProcessor.ts)
-// intentionally isn't exercised by this Jest suite: it calls a plain
-// `require()` of pdfjs-dist's ESM build, relying on Node's own native
-// require(ESM) support - which works in a real `node`/`tsx` process (as
-// used by `npm run dev`/`npm start`, and by Vercel's Node runtime) but not
-// inside Jest's own module loader, which is exactly the incompatibility the
-// child-process worker exists to route around for tests in the first
-// place. That path is verified manually instead (see README's deployment
-// notes) by running it under `tsx` with `VERCEL=1` set and diffing the
-// output against the default worker path.
+// intentionally isn't exercised by this Jest suite: it loads pdfjs-dist's
+// ESM build via a real dynamic `import()`, kept behind `new Function(...)`
+// so TypeScript's CommonJS output can't rewrite it back into a `require()`
+// (which fails at runtime on Vercel - see the comment on `runInProcess`).
+// Neither Jest's module loader nor a bundler's static analysis can see
+// through that indirection the way a real Node process can, which is
+// exactly why it's there - so this path can't be driven from here. It's
+// verified instead by running it under `tsx` with `VERCEL=1` set and
+// diffing the output against the default worker path (done manually before
+// each change to this file), and - the strongest check - by executing the
+// actual bundled `vercel build` output directly with plain `node` against
+// a real upload/process/chat request, which caught two real bugs
+// (`require()` vs `import()`, and a `require.resolve("pdfjs-dist/package.json")`
+// that doesn't survive bundling) that running the TypeScript source
+// directly never would have.

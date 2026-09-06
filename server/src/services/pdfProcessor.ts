@@ -60,18 +60,30 @@ function runExtractionWorker(pdfFilePath: string): Promise<WorkerResult> {
  *  1. A serverless function's deployment bundle is built by statically
  *     tracing `require`/`import` calls. A path only ever referenced via
  *     `execFile(...)` (as the worker is) is invisible to that tracer and
- *     would silently be left out of the deployed bundle - the same
- *     `require("pdfjs-dist/...")` here is a normal, staticaly-traceable
- *     call reachable from this file's own import graph, so it bundles
- *     correctly.
+ *     would silently be left out of the deployed bundle - a call reachable
+ *     from this file's own import graph bundles correctly instead.
  *  2. The crash/hang isolation a child process buys on a long-running
  *     server is largely redundant on Vercel: each invocation already runs
  *     in its own short-lived, isolated sandbox, so an in-process failure
  *     here only ever fails that one request.
+ *
+ * pdfjs-dist's build is ESM-only, which needs a real dynamic `import()` at
+ * runtime on Vercel's Lambda Node runtime - a plain `require()` fails there
+ * with "require() of ES Module ... not supported". A literal `import()`
+ * isn't good enough on its own though: TypeScript's CommonJS output (which
+ * is what actually gets deployed here, not a raw esbuild passthrough)
+ * rewrites `await import(x)` into `Promise.resolve().then(() =>
+ * require(x))` - functionally still a plain `require()`, hitting the exact
+ * same error. Building the specifier string behind `new Function(...)`
+ * keeps the call invisible to that rewrite, so it stays a genuine dynamic
+ * import at runtime.
  */
+const dynamicImport = new Function("specifier", "return import(specifier)") as (
+  specifier: string
+) => Promise<typeof import("pdfjs-dist/legacy/build/pdf.mjs")>;
+
 async function runInProcess(buffer: Buffer): Promise<WorkerResult> {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const pdfjs = require("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdfjs = await dynamicImport("pdfjs-dist/legacy/build/pdf.mjs");
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { extractPages } = require("../../scripts/pdfExtractCore");
   return extractPages(pdfjs, buffer);

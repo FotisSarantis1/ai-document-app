@@ -17,7 +17,16 @@ const path = require("path");
  */
 
 function standardFontDataUrl() {
-  return path.join(path.dirname(require.resolve("pdfjs-dist/package.json")), "standard_fonts/");
+  // Deliberately not require.resolve("pdfjs-dist/package.json"): Vercel's
+  // deployment bundle is built by tracing which files are actually
+  // require()'d, and a package's package.json isn't reliably included in
+  // that trace even when the package itself is (observed in production -
+  // legacy/build/pdf.mjs and standard_fonts/ get bundled, package.json
+  // doesn't). Deriving the package root from a file we know is required
+  // works in every environment instead of depending on that file existing.
+  const pdfMjsPath = require.resolve("pdfjs-dist/legacy/build/pdf.mjs");
+  const packageRoot = path.join(path.dirname(pdfMjsPath), "..", "..");
+  return path.join(packageRoot, "standard_fonts/");
 }
 
 async function extractPages(pdfjs, buffer) {
@@ -45,4 +54,4 @@ async function extractPages(pdfjs, buffer) {
   return { pageCount: pages.length, pages };
 }
 
-module.exports = { extractPages };
+module.exports = { extractPages, standardFontDataUrl };
